@@ -7,6 +7,7 @@ import {
   getProviderBaseUrlEnvKey,
   getProviderLabel,
   getProviderModelOptions,
+  isCliProvider,
   isValidBaseUrl,
   isValidModelId,
   normalizeModelId,
@@ -35,7 +36,13 @@ type InitSetupProps = {
   onError: (message: string) => void;
 };
 
-type PromptStep = "api-key" | "base-url" | "langsmith" | "model" | "provider";
+type PromptStep =
+  | "api-key"
+  | "base-url"
+  | "copilot-cli"
+  | "langsmith"
+  | "model"
+  | "provider";
 
 export function needsCredentialSetup(
   modelIdOverride: string | null = null,
@@ -45,9 +52,10 @@ export function needsCredentialSetup(
 
   return (
     process.env[OPENWIKI_PROVIDER_ENV_KEY] === undefined ||
-    !process.env[apiKeyEnvKey] ||
+    (apiKeyEnvKey !== undefined && !process.env[apiKeyEnvKey]) ||
     needsBaseUrlStep(provider) ||
-    (modelIdOverride === null &&
+    (!isCliProvider(provider) &&
+      modelIdOverride === null &&
       process.env[OPENWIKI_MODEL_ID_ENV_KEY] === undefined) ||
     process.env.LANGSMITH_API_KEY === undefined
   );
@@ -65,6 +73,12 @@ function isBaseUrlConfigured(provider: OpenWikiProvider): boolean {
   const baseUrlEnvKey = getProviderBaseUrlEnvKey(provider);
 
   return baseUrlEnvKey ? Boolean(process.env[baseUrlEnvKey]) : false;
+}
+
+function hasProviderApiKey(provider: OpenWikiProvider): boolean {
+  const apiKeyEnvKey = getProviderApiKeyEnvKey(provider);
+
+  return apiKeyEnvKey ? Boolean(process.env[apiKeyEnvKey]) : false;
 }
 
 export function InitSetup({
@@ -174,6 +188,14 @@ export function InitSetup({
       return;
     }
 
+    if (step === "copilot-cli") {
+      if (key.return) {
+        void submit();
+      }
+
+      return;
+    }
+
     if (key.return) {
       void submit();
       return;
@@ -228,6 +250,25 @@ export function InitSetup({
         nextLangSmithKey: langSmithKey,
         nextModelId: modelId,
         nextProvider: selectedProvider,
+      });
+      return;
+    }
+
+    if (step === "copilot-cli") {
+      setInput("");
+      const nextStep = getNextStepAfterCopilotCli();
+
+      if (nextStep) {
+        setStep(nextStep);
+        return;
+      }
+
+      await completeSetup({
+        nextApiKey: null,
+        nextBaseUrl: null,
+        nextLangSmithKey: langSmithKey,
+        nextModelId: null,
+        nextProvider: provider,
       });
       return;
     }
@@ -380,7 +421,11 @@ export function InitSetup({
       }
 
       if (nextApiKey !== null) {
-        updates[getProviderApiKeyEnvKey(nextProvider)] = nextApiKey;
+        const apiKeyEnvKey = getProviderApiKeyEnvKey(nextProvider);
+
+        if (apiKeyEnvKey) {
+          updates[apiKeyEnvKey] = nextApiKey;
+        }
       }
 
       if (nextBaseUrl !== null) {
@@ -454,49 +499,55 @@ export function InitSetup({
           }
           detail={getProviderSetupDetail(provider)}
         />
-        <SetupStep
-          label="Provider key"
-          state={
-            process.env[getProviderApiKeyEnvKey(provider)]
-              ? "done"
-              : step === "api-key"
-                ? "current"
-                : "pending"
-          }
-          detail={
-            process.env[getProviderApiKeyEnvKey(provider)]
-              ? "available from environment"
-              : `save ${getProviderApiKeyEnvKey(provider)} to ${openWikiEnvPath}`
-          }
-        />
-        {providerRequiresBaseUrl(provider) ? (
+        {isCliProvider(provider) ? (
           <SetupStep
-            label="Base URL"
+            label="Copilot CLI"
             state={
-              isBaseUrlConfigured(provider)
-                ? "done"
-                : step === "base-url"
-                  ? "current"
+              step === "copilot-cli"
+                ? "current"
+                : process.env[OPENWIKI_PROVIDER_ENV_KEY]
+                  ? "done"
                   : "pending"
             }
-            detail={
-              isBaseUrlConfigured(provider)
-                ? "available from environment"
-                : `save ${getProviderBaseUrlEnvKey(provider)} to ${openWikiEnvPath}`
-            }
+            detail="requires the `copilot` CLI installed and authenticated (run `copilot` once to sign in)"
           />
-        ) : null}
-        <SetupStep
-          label="Model"
-          state={
-            modelIdOverride || process.env[OPENWIKI_MODEL_ID_ENV_KEY]
-              ? "done"
-              : step === "model"
-                ? "current"
-                : "pending"
-          }
-          detail={getModelSetupDetail(modelIdOverride, provider)}
-        />
+        ) : (
+          <>
+            <SetupStep
+              label="Provider key"
+              state={getProviderKeyStepState(provider, step)}
+              detail={getProviderKeyDetail(provider)}
+            />
+            {providerRequiresBaseUrl(provider) ? (
+              <SetupStep
+                label="Base URL"
+                state={
+                  isBaseUrlConfigured(provider)
+                    ? "done"
+                    : step === "base-url"
+                      ? "current"
+                      : "pending"
+                }
+                detail={
+                  isBaseUrlConfigured(provider)
+                    ? "available from environment"
+                    : `save ${getProviderBaseUrlEnvKey(provider)} to ${openWikiEnvPath}`
+                }
+              />
+            ) : null}
+            <SetupStep
+              label="Model"
+              state={
+                modelIdOverride || process.env[OPENWIKI_MODEL_ID_ENV_KEY]
+                  ? "done"
+                  : step === "model"
+                    ? "current"
+                    : "pending"
+              }
+              detail={getModelSetupDetail(modelIdOverride, provider)}
+            />
+          </>
+        )}
         <SetupStep
           label="LangSmith"
           state={
@@ -650,6 +701,24 @@ function Prompt({
     );
   }
 
+  if (step === "copilot-cli") {
+    return (
+      <Box flexDirection="column">
+        <Text>
+          OpenWiki will run the <Text color="yellow">copilot</Text> CLI
+          directly instead of calling a model API.
+        </Text>
+        <Text color="gray">
+          Install it and sign in once with `copilot` if you have not already.
+        </Text>
+        <Text color="gray">
+          No API key or model selection is needed for this provider.
+        </Text>
+        <Text color="gray">Press Enter to continue.</Text>
+      </Box>
+    );
+  }
+
   if (step === "api-key") {
     return (
       <Box flexDirection="column">
@@ -750,7 +819,11 @@ function getInitialStep(
     return "provider";
   }
 
-  if (!process.env[getProviderApiKeyEnvKey(provider)]) {
+  if (isCliProvider(provider)) {
+    return getNextStepAfterCopilotCli();
+  }
+
+  if (!hasProviderApiKey(provider)) {
     return "api-key";
   }
 
@@ -776,11 +849,23 @@ function getNextStepAfterProvider(
   provider: OpenWikiProvider,
   modelIdOverride: string | null,
 ): PromptStep | null {
-  if (!process.env[getProviderApiKeyEnvKey(provider)]) {
+  if (isCliProvider(provider)) {
+    return "copilot-cli";
+  }
+
+  if (!hasProviderApiKey(provider)) {
     return "api-key";
   }
 
   return getNextStepAfterApiKey(provider, modelIdOverride);
+}
+
+function getNextStepAfterCopilotCli(): PromptStep | null {
+  if (process.env.LANGSMITH_API_KEY === undefined) {
+    return "langsmith";
+  }
+
+  return null;
 }
 
 function getNextStepAfterApiKey(
@@ -818,6 +903,31 @@ function getProviderSetupDetail(provider: OpenWikiProvider): string {
   }
 
   return `default ${getProviderLabel(DEFAULT_PROVIDER)}`;
+}
+
+function getProviderKeyStepState(
+  provider: OpenWikiProvider,
+  step: PromptStep | null,
+): "current" | "done" | "pending" {
+  const apiKeyEnvKey = getProviderApiKeyEnvKey(provider);
+
+  if (apiKeyEnvKey && process.env[apiKeyEnvKey]) {
+    return "done";
+  }
+
+  return step === "api-key" ? "current" : "pending";
+}
+
+function getProviderKeyDetail(provider: OpenWikiProvider): string {
+  const apiKeyEnvKey = getProviderApiKeyEnvKey(provider);
+
+  if (!apiKeyEnvKey) {
+    return "not required for this provider";
+  }
+
+  return process.env[apiKeyEnvKey]
+    ? "available from environment"
+    : `save ${apiKeyEnvKey} to ${openWikiEnvPath}`;
 }
 
 function getModelSetupDetail(

@@ -1,5 +1,10 @@
 import { OPEN_WIKI_DIR, UPDATE_METADATA_PATH } from "../constants.js";
-import { OpenWikiCommand, RunContext, UpdateMetadata } from "./types.js";
+import {
+  OpenWikiCommand,
+  OpenWikiRunOptions,
+  RunContext,
+  UpdateMetadata,
+} from "./types.js";
 
 function formatLastUpdate(lastUpdate: UpdateMetadata | null): string {
   if (lastUpdate === null) {
@@ -226,5 +231,38 @@ ${prompt}
 
 Additional user instruction:
 ${userMessage.trim()}
+`.trim();
+}
+
+/**
+ * Builds the single prompt string passed to the Copilot CLI (`copilot -p`)
+ * subprocess. Unlike {@link createSystemPrompt}'s DeepAgents/LocalShellBackend
+ * counterpart, Copilot CLI operates directly on the real filesystem using its
+ * own built-in tools, so this omits the virtual-path runtime note and instead
+ * clarifies that paths are real and repository-relative.
+ */
+export function createCopilotCliRunPrompt(
+  command: OpenWikiCommand,
+  cwd: string,
+  context: RunContext,
+  options: OpenWikiRunOptions,
+): string {
+  if (options.isFollowup === true && options.userMessage?.trim()) {
+    return options.userMessage.trim();
+  }
+
+  return `
+${createSystemPrompt(command)}
+
+${createUserPrompt(command, context, options.userMessage ?? null)}
+
+Repository root:
+${cwd}
+
+Runtime note:
+- Treat the repository root above as the only project you are documenting.
+- You are operating directly on the real filesystem at the repository root using your own built-in tools. There is no virtual filesystem root: use normal repository-relative paths such as openwiki/quickstart.md.
+- Run any shell commands from the repository root above.
+- Do not search parent directories or unrelated repositories.
 `.trim();
 }

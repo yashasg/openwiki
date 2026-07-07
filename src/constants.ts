@@ -72,6 +72,7 @@ export const SELECTABLE_OPENWIKI_PROVIDERS = [
   "openai",
   "openai-compatible",
   "anthropic",
+  "copilot-cli",
 ] as const satisfies readonly SelectableOpenWikiProvider[];
 
 export const PROVIDER_CONFIGS: Record<OpenWikiProvider, ProviderConfig> = {
@@ -121,6 +122,11 @@ export const PROVIDER_CONFIGS: Record<OpenWikiProvider, ProviderConfig> = {
       { id: "claude-opus-4-8", label: "Opus" },
     ],
   },
+  "copilot-cli": {
+    authMode: "cli",
+    label: "Copilot CLI",
+    modelOptions: [],
+  },
   openrouter: {
     apiKeyEnvKey: OPENROUTER_API_KEY_ENV_KEY,
     baseURL: OPENROUTER_BASE_URL,
@@ -157,7 +163,27 @@ export function getProviderLabel(provider: OpenWikiProvider): string {
   return getProviderConfig(provider).label;
 }
 
-export function getProviderApiKeyEnvKey(provider: OpenWikiProvider): string {
+export function getProviderAuthMode(
+  provider: OpenWikiProvider,
+): OpenWikiProviderAuthMode {
+  return getProviderConfig(provider).authMode ?? "api-key";
+}
+
+export function providerRequiresApiKey(provider: OpenWikiProvider): boolean {
+  return getProviderAuthMode(provider) === "api-key";
+}
+
+export function isCliProvider(provider: OpenWikiProvider): boolean {
+  return getProviderAuthMode(provider) === "cli";
+}
+
+/**
+ * Returns the provider's API key environment variable, or `undefined` for
+ * `cli` auth-mode providers, which have no API key to configure.
+ */
+export function getProviderApiKeyEnvKey(
+  provider: OpenWikiProvider,
+): string | undefined {
   return getProviderConfig(provider).apiKeyEnvKey;
 }
 
@@ -215,7 +241,22 @@ export function getProviderModelOptions(
 }
 
 export function getDefaultModelId(provider: OpenWikiProvider): string {
+  if (isCliProvider(provider)) {
+    return COPILOT_CLI_MODEL_ID;
+  }
+
   return getProviderModelOptions(provider)[0]?.id ?? DEFAULT_MODEL_ID;
+}
+
+/**
+ * Resolves the `copilot` binary/command to invoke for the `copilot-cli`
+ * provider, allowing an override (e.g. a full path or wrapper script) via
+ * {@link COPILOT_CLI_COMMAND_ENV_KEY}.
+ */
+export function resolveCopilotCliCommand(
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  return env[COPILOT_CLI_COMMAND_ENV_KEY]?.trim() || DEFAULT_COPILOT_CLI_COMMAND;
 }
 
 export function normalizeProvider(

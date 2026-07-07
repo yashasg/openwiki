@@ -32,6 +32,7 @@ import {
   getProviderApiKeyEnvKey,
   getProviderLabel,
   getProviderModelOptions,
+  isCliProvider,
   isValidModelId,
   normalizeModelId,
   normalizeProvider,
@@ -238,7 +239,7 @@ function App({ command }: AppProps) {
 
     const apiKeyEnvKey = getProviderApiKeyEnvKey(sessionProvider);
 
-    if (!process.env[apiKeyEnvKey] && !process.stdin.isTTY) {
+    if (apiKeyEnvKey && !process.env[apiKeyEnvKey] && !process.stdin.isTTY) {
       setRunState({
         status: "error",
         message: `${apiKeyEnvKey} is required. Run openwiki in an interactive terminal to save credentials.`,
@@ -1504,7 +1505,7 @@ function ChatInput({
 
     if (provider === null) {
       setError(
-        "Enter a valid provider: openrouter, baseten, fireworks, openai, or anthropic.",
+        "Enter a valid provider: openrouter, baseten, fireworks, openai, openai-compatible, anthropic, or copilot-cli.",
       );
       return;
     }
@@ -1517,9 +1518,11 @@ function ChatInput({
       await onProviderSelect(provider);
       resetInput();
       setNotice(
-        `Provider switched to ${getProviderLabel(provider)} with model ${getDefaultModelId(
-          provider,
-        )}. Ensure ${getProviderApiKeyEnvKey(provider)} is set.`,
+        isCliProvider(provider)
+          ? `Provider switched to ${getProviderLabel(provider)}. Ensure the copilot CLI is installed and authenticated.`
+          : `Provider switched to ${getProviderLabel(provider)} with model ${getDefaultModelId(
+              provider,
+            )}. Ensure ${getProviderApiKeyEnvKey(provider)} is set.`,
       );
     } catch (saveError) {
       setError(
@@ -3059,7 +3062,9 @@ function resolveStartupCommand(command: CliCommand): CliCommand {
   ) {
     const provider = resolveConfiguredProvider();
     const apiKeyEnvKey = getProviderApiKeyEnvKey(provider);
-    const hasProviderKey = Boolean(process.env[apiKeyEnvKey]);
+    const hasProviderKey = apiKeyEnvKey
+      ? Boolean(process.env[apiKeyEnvKey])
+      : true;
 
     if (!hasProviderKey) {
       return {
