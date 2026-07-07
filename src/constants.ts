@@ -10,16 +10,28 @@ export const ANTHROPIC_BASE_URL_ENV_KEY = "ANTHROPIC_BASE_URL";
 export const OPENROUTER_API_KEY_ENV_KEY = "OPENROUTER_API_KEY";
 export const OPENWIKI_PROVIDER_ENV_KEY = "OPENWIKI_PROVIDER";
 export const OPENWIKI_MODEL_ID_ENV_KEY = "OPENWIKI_MODEL_ID";
+export const COPILOT_CLI_COMMAND_ENV_KEY = "OPENWIKI_COPILOT_CLI_COMMAND";
+export const DEFAULT_COPILOT_CLI_COMMAND = "copilot";
+export const COPILOT_CLI_MODEL_ID = "copilot-cli";
 export const DEFAULT_PROVIDER = "openrouter";
 export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
 export type OpenWikiProvider =
   | "anthropic"
   | "baseten"
+  | "copilot-cli"
   | "fireworks"
   | "openai"
   | "openai-compatible"
   | "openrouter";
+
+/**
+ * `api-key` providers are LangChain chat-model wrappers configured with an
+ * API key (and optionally a base URL). `cli` providers instead shell out to a
+ * self-contained agentic CLI binary that authenticates and executes on its
+ * own, so they have no API key, base URL, or selectable model list.
+ */
+export type OpenWikiProviderAuthMode = "api-key" | "cli";
 
 export type SelectableOpenWikiProvider = OpenWikiProvider;
 
@@ -29,7 +41,15 @@ export type ProviderModelOption = {
 };
 
 type ProviderConfig = {
-  apiKeyEnvKey: string;
+  /**
+   * Environment variable holding the provider's API key. Omitted for `cli`
+   * auth-mode providers, which authenticate outside of OpenWiki entirely.
+   */
+  apiKeyEnvKey?: string;
+  /**
+   * Defaults to "api-key" when omitted. See {@link OpenWikiProviderAuthMode}.
+   */
+  authMode?: OpenWikiProviderAuthMode;
   baseURL?: string;
   /**
    * Environment variable that, when set, overrides {@link ProviderConfig.baseURL}
