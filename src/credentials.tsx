@@ -54,10 +54,24 @@ export function needsCredentialSetup(
     process.env[OPENWIKI_PROVIDER_ENV_KEY] === undefined ||
     (apiKeyEnvKey !== undefined && !process.env[apiKeyEnvKey]) ||
     needsBaseUrlStep(provider) ||
-    (!isCliProvider(provider) &&
-      modelIdOverride === null &&
-      process.env[OPENWIKI_MODEL_ID_ENV_KEY] === undefined) ||
+    needsModelIdSetup(provider, modelIdOverride) ||
     process.env.LANGSMITH_API_KEY === undefined
+  );
+}
+
+function needsModelIdSetup(
+  provider: OpenWikiProvider,
+  modelIdOverride: string | null,
+): boolean {
+  if (isCliProvider(provider)) {
+    // CLI-based providers (e.g. copilot-cli) use a fixed pseudo-model id and
+    // never prompt for or read OPENWIKI_MODEL_ID.
+    return false;
+  }
+
+  return (
+    modelIdOverride === null &&
+    process.env[OPENWIKI_MODEL_ID_ENV_KEY] === undefined
   );
 }
 

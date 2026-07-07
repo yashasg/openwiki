@@ -23,7 +23,7 @@ When `--init` or `--update` is run in a TTY (without `--print`), the CLI starts 
 
 ### Non-interactive mode
 
-If stdin is not a TTY (e.g. CI), or `--print` is used, the CLI requires a provider API key to be already saved in `~/.openwiki/.env` or present in the environment. It will error with a clear message if the key is missing, rather than prompting interactively.
+If stdin is not a TTY (e.g. CI), or `--print` is used, the CLI requires a provider API key to be already saved in `~/.openwiki/.env` or present in the environment (except for the `copilot-cli` provider, which has no API key and instead requires the `copilot` binary to be installed and authenticated). It will error with a clear message if the key is missing, rather than prompting interactively.
 
 ## Interactive behavior
 
@@ -43,10 +43,10 @@ The UI persists provider and model selection back to `~/.openwiki/.env` through 
 
 The first interactive run can prompt for:
 
-- a **provider** (`OPENWIKI_PROVIDER`) — openrouter, baseten, fireworks, openai, openai-compatible, or anthropic,
-- the **provider API key** (e.g. `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `OPENAI_COMPATIBLE_API_KEY`, `ANTHROPIC_API_KEY`, `BASETEN_API_KEY`, `FIREWORKS_API_KEY`),
+- a **provider** (`OPENWIKI_PROVIDER`) — openrouter, baseten, fireworks, openai, openai-compatible, anthropic, or copilot-cli,
+- the **provider API key** (e.g. `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `OPENAI_COMPATIBLE_API_KEY`, `ANTHROPIC_API_KEY`, `BASETEN_API_KEY`, `FIREWORKS_API_KEY`) — skipped for the `copilot-cli` provider, which has no API key,
 - a **base URL** for providers that require one (the openai-compatible provider prompts for `OPENAI_COMPATIBLE_BASE_URL`),
-- a **model ID** stored as `OPENWIKI_MODEL_ID` — chosen from the provider's model list or a custom ID,
+- a **model ID** stored as `OPENWIKI_MODEL_ID` — chosen from the provider's model list or a custom ID (skipped for `copilot-cli`, which uses a fixed pseudo-model ID),
 - optional `LANGSMITH_API_KEY` for tracing.
 
 If a LangSmith key is provided, onboarding also enables `LANGCHAIN_PROJECT=openwiki` and `LANGCHAIN_TRACING_V2=true`.
@@ -65,6 +65,7 @@ Providers and their model options are defined in `PROVIDER_CONFIGS` in `src/cons
 | openai            | `OPENAI_API_KEY`            | (default)                               | GPT 5.4 mini, GPT 5.5                                                 |
 | openai-compatible | `OPENAI_COMPATIBLE_API_KEY` | `OPENAI_COMPATIBLE_BASE_URL` (required) | custom model ID only                                                  |
 | anthropic         | `ANTHROPIC_API_KEY`         | (default, or `ANTHROPIC_BASE_URL`)      | Haiku, Sonnet, Opus                                                   |
+| copilot-cli       | none (uses `copilot` binary)| n/a                                     | fixed pseudo-model only                                               |
 
 The default provider is `openrouter`. `resolveConfiguredProvider()` picks the provider from `OPENWIKI_PROVIDER`, falling back to openrouter if `OPENROUTER_API_KEY` is set, then to `DEFAULT_PROVIDER`.
 
@@ -98,6 +99,10 @@ OPENWIKI_MODEL_ID=<model name the gateway exposes>
 Base URLs are resolved by `resolveProviderBaseUrl()` in `src/constants.ts`, which
 prefers a provider's `baseUrlEnvKey` override over the built-in default.
 
+### GitHub Copilot CLI provider
+
+The `copilot-cli` provider has `authMode: "cli"` instead of `"api-key"` (see `getProviderAuthMode()`/`isCliProvider()` in `src/constants.ts`). It has no API key, base URL, or model list — it requires the `copilot` binary (from the GitHub Copilot CLI) to be installed and authenticated on the host, resolved via `resolveCopilotCliCommand()` (default `copilot`, overridable with `OPENWIKI_COPILOT_CLI_COMMAND`). Instead of building a LangChain chat model, `runOpenWikiAgent()` in `src/agent/index.ts` short-circuits to `runCopilotCliAgent()`, which spawns the CLI as a subprocess (`copilot -p <prompt> --autopilot --yolo --no-ask-user --no-color`) and streams its stdout as run events, bypassing DeepAgents/LangGraph entirely. Each run is a fresh, stateless subprocess, so unlike the other providers it does not resume a prior conversation across `/chat` follow-ups.
+
 ## Help text and validation
 
 The help content is centralized in `src/commands.ts` and is used by the CLI UI. Model validation is intentionally strict:
@@ -112,7 +117,7 @@ The help content is centralized in `src/commands.ts` and is used by the CLI UI. 
 - Update parser behavior in `src/commands.ts` first.
 - Then update any user-visible text in `src/cli.tsx` and `README.md`.
 - If new options affect run behavior, make sure `src/agent/index.ts` and `src/credentials.tsx` still receive the right inputs.
-- If adding a provider, update `PROVIDER_CONFIGS` and `SELECTABLE_OPENWIKI_PROVIDERS` in `src/constants.ts`, `managedEnvKeys` in `src/env.ts`, and the `createModel` branch in `src/agent/index.ts`.
+- If adding a provider, update `PROVIDER_CONFIGS` and `SELECTABLE_OPENWIKI_PROVIDERS` in `src/constants.ts`, `MANAGED_ENV_KEYS`/`CREDENTIAL_DIAGNOSTIC_ENV_KEYS` in `src/env.ts`, and the `createModel` branch (or, for a CLI-based provider, the `isCliProvider` branch) in `src/agent/index.ts`.
 - To let a provider accept an alternative base URL, set `baseUrlEnvKey` on its `PROVIDER_CONFIGS` entry, add that key to `managedEnvKeys` in `src/env.ts`, and read it through `resolveProviderBaseUrl()` in the provider's `createModel` branch.
 - To require a user-supplied base URL (a provider with no default endpoint, like `openai-compatible`), also set `requiresBaseUrl: true`. `ensureProviderBaseUrl()` in `src/agent/index.ts` enforces it at runtime, and the interactive setup adds a base-URL step for such providers.
 - Re-check the `package.json` bin entry and scripts if the entrypoint changes.

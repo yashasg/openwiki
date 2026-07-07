@@ -43,10 +43,11 @@ Model creation branches by provider in `src/agent/index.ts` (`createModel`):
 - **anthropic** → `ChatAnthropic` with the Anthropic API key.
 - **openrouter** → `ChatOpenRouter` with `route: "fallback"` and a list of fallback models.
 - **baseten / fireworks / openai** → `ChatOpenAI` with the provider's API key and optional custom `baseURL` from `PROVIDER_CONFIGS`.
+- **copilot-cli** → no chat model is created at all. `isCliProvider()` short-circuits `runOpenWikiAgent()` to `runCopilotCliAgent()`, which spawns the `copilot` CLI binary as a subprocess instead of using DeepAgents/LangGraph.
 
 ### DeepAgents backend
 
-The agent uses a DeepAgents `LocalShellBackend` rooted at the repository, configured with `virtualMode: true`, `maxOutputBytes: 100_000`, and a 120 second timeout. A SQLite checkpointer (`~/.openwiki/openwiki.sqlite`) persists conversation threads keyed by a hash of the repository path.
+The agent uses a DeepAgents `LocalShellBackend` rooted at the repository, configured with `virtualMode: true`, `maxOutputBytes: 100_000`, and a 120 second timeout. A SQLite checkpointer (`~/.openwiki/openwiki.sqlite`) persists conversation threads keyed by a hash of the repository path. This entire backend — DeepAgents, the checkpointer, and model fallback — is bypassed for the `copilot-cli` provider, which instead runs the `copilot` binary directly against the real filesystem and has no cross-run conversation persistence.
 
 ### Content snapshot and metadata writes
 

@@ -18,8 +18,9 @@ The file stores provider configuration and API keys:
 
 - `OPENWIKI_PROVIDER` — the selected model provider
 - `OPENWIKI_MODEL_ID` — the default model ID
-- Provider API keys: `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `OPENAI_COMPATIBLE_API_KEY`, `ANTHROPIC_API_KEY`, `BASETEN_API_KEY`, `FIREWORKS_API_KEY`
+- Provider API keys: `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `OPENAI_COMPATIBLE_API_KEY`, `ANTHROPIC_API_KEY`, `BASETEN_API_KEY`, `FIREWORKS_API_KEY` (the `copilot-cli` provider has no API key)
 - Base URLs: `ANTHROPIC_BASE_URL` (optional — routes the anthropic provider at an Anthropic-compatible endpoint other than the default API) and `OPENAI_COMPATIBLE_BASE_URL` (required by the openai-compatible provider, which has no default endpoint)
+- `OPENWIKI_COPILOT_CLI_COMMAND` — optional override for the `copilot` binary name/path used by the `copilot-cli` provider (defaults to `copilot`)
 - Optional LangSmith settings: `LANGSMITH_API_KEY`, `LANGCHAIN_PROJECT`, `LANGCHAIN_TRACING_V2`
 
 The loader merges those values into `process.env`, while preferring existing process-level values over file values. Deprecated keys (`OPENAI_BASE_URL`, `OPENAI_ORG_ID`, `OPENAI_PROJECT`) are skipped on load and removed on save.
@@ -27,13 +28,13 @@ The loader merges those values into `process.env`, while preferring existing pro
 `src/credentials.tsx` provides the interactive bootstrap flow when required:
 
 - prompts for a provider (arrow-key selection menu),
-- prompts for the provider's API key,
-- prompts for a model choice (arrow-key selection from the provider's model list, or a custom model ID),
+- prompts for the provider's API key (skipped for the `copilot-cli` provider, which shows an install/authentication info screen instead),
+- prompts for a model choice (arrow-key selection from the provider's model list, or a custom model ID; also skipped for `copilot-cli`, which uses a fixed pseudo-model ID),
 - optionally prompts for a LangSmith key,
 - writes the results with restrictive file permissions,
 - removes deprecated OpenAI-related environment variables when saving.
 
-The setup flow runs for **all** interactive commands (chat, init, and update) when credentials are missing — not just chat. In non-interactive mode (no TTY or `--print`), missing provider keys produce an error instead of a prompt.
+The setup flow runs for **all** interactive commands (chat, init, and update) when credentials are missing — not just chat. In non-interactive mode (no TTY or `--print`), missing provider keys produce an error instead of a prompt (not applicable to `copilot-cli`, which has no key to be missing).
 
 ## Provider resolution
 
@@ -43,7 +44,7 @@ The setup flow runs for **all** interactive commands (chat, init, and update) wh
 2. Otherwise, if `OPENROUTER_API_KEY` is present, default to `openrouter`.
 3. Otherwise, fall back to `DEFAULT_PROVIDER` (`openrouter`).
 
-`needsCredentialSetup()` in `src/credentials.tsx` checks whether the provider env var, the provider's API key, a model ID (unless overridden), and a LangSmith key are all present. Any missing value triggers the interactive flow.
+`needsCredentialSetup()` in `src/credentials.tsx` checks whether the provider env var, the provider's API key, a model ID (unless overridden), and a LangSmith key are all present. Any missing value triggers the interactive flow. For CLI-based providers (`isCliProvider()`, currently `copilot-cli`), the API key and model ID checks are skipped since neither applies.
 
 ## Model and credential diagnostics
 
@@ -57,7 +58,7 @@ The env layer also produces diagnostics for the CLI UI. Those diagnostics report
 - invalid model IDs,
 - invalid provider values.
 
-Diagnostics cover all six provider keys plus `OPENWIKI_PROVIDER`, `OPENWIKI_MODEL_ID`, the base URLs (`ANTHROPIC_BASE_URL`, `OPENAI_COMPATIBLE_BASE_URL`), and `LANGSMITH_API_KEY`. This makes startup problems easier to diagnose without exposing secret values (non-secret values such as the provider, model ID, and base URLs are shown in full).
+Diagnostics cover all six provider keys plus `OPENWIKI_PROVIDER`, `OPENWIKI_MODEL_ID`, the base URLs (`ANTHROPIC_BASE_URL`, `OPENAI_COMPATIBLE_BASE_URL`), `OPENWIKI_COPILOT_CLI_COMMAND`, and `LANGSMITH_API_KEY`. This makes startup problems easier to diagnose without exposing secret values (non-secret values such as the provider, model ID, base URLs, and the Copilot CLI command are shown in full).
 
 ## Update metadata
 
