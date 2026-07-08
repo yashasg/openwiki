@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { chmod, mkdir } from "node:fs/promises";
 import path from "node:path";
@@ -8,7 +9,11 @@ import { ChatOpenRouter } from "@langchain/openrouter";
 import { createDeepAgent, LocalShellBackend } from "deepagents";
 import { DEBUG_ENV_KEYS, loadOpenWikiEnv, openWikiEnvDir } from "../env.js";
 import { isFileNotFoundError } from "../fs-errors.js";
-import { createSystemPrompt, createUserPrompt } from "./prompt.js";
+import {
+  createCopilotCliRunPrompt,
+  createSystemPrompt,
+  createUserPrompt,
+} from "./prompt.js";
 import type {
   OpenWikiCommand,
   OpenWikiRunEvent,
@@ -17,10 +22,12 @@ import type {
 } from "./types.js";
 import {
   ANTHROPIC_BASE_URL_ENV_KEY,
+  COPILOT_CLI_MODEL_ID,
   getDefaultModelId,
   getProviderApiKeyEnvKey,
   getProviderBaseUrlEnvKey,
   getProviderLabel,
+  isCliProvider,
   isValidModelId,
   normalizeModelId,
   OPENAI_COMPATIBLE_BASE_URL_ENV_KEY,
@@ -31,6 +38,7 @@ import {
   OPENWIKI_PROVIDER_ENV_KEY,
   providerRequiresBaseUrl,
   resolveConfiguredProvider,
+  resolveCopilotCliCommand,
   resolveProviderBaseUrl,
   type OpenWikiProvider,
 } from "../constants.js";
@@ -82,8 +90,13 @@ export async function runOpenWikiAgent(
   }
 
   const provider = resolveConfiguredProvider();
-  const providerBaseUrl = resolveProviderBaseUrl(provider);
   emitDebug(options, `provider=${provider}`);
+
+  if (isCliProvider(provider)) {
+    return runCopilotCliAgent(command, cwd, options);
+  }
+
+  const providerBaseUrl = resolveProviderBaseUrl(provider);
   if (providerBaseUrl) {
     emitDebug(options, `provider.baseUrl=${JSON.stringify(providerBaseUrl)}`);
   }
@@ -272,6 +285,131 @@ async function runOpenWikiAgentCore(
   };
 }
 
+/**
+ * Runs OpenWiki using the GitHub Copilot CLI (`copilot`) as a self-contained
+ * agentic subprocess instead of a LangChain chat model driven by DeepAgents.
+ *
+ * Unlike the other providers, Copilot CLI:
+ * - Authenticates via its own GitHub login, not an API key OpenWiki manages.
+ * - Runs its own agent loop, tool use, and filesystem access as a child
+ *   process operating directly on the real repository at `cwd` (there is no
+ *   DeepAgents virtual filesystem or LangGraph checkpointer involved).
+ * - Has no selectable model ID or fallback route; each run is a single,
+ *   stateless invocation of the CLI binary, so multi-turn `/chat` follow-ups
+ *   do not resume prior conversation state the way the LangGraph-backed
+ *   providers do.
+ */
+async function runCopilotCliAgent(
+  command: OpenWikiCommand,
+  cwd: string,
+  options: OpenWikiRunOptions,
+): Promise<OpenWikiRunResult> {
+  const context = await createRunContext(command, cwd);
+  emitDebug(options, "context=created");
+  const openWikiSnapshotBefore =
+    command === "chat" ? null : await createOpenWikiContentSnapshot(cwd);
+  emitDebug(options, "openwiki.snapshot=created");
+
+  const prompt = createCopilotCliRunPrompt(command, cwd, context, options);
+  const copilotCommand = resolveCopilotCliCommand();
+  emitDebug(options, `copilot.command=${copilotCommand}`);
+
+  await runCopilotCliProcess(copilotCommand, prompt, cwd, options);
+  emitDebug(options, "copilot.process=completed");
+
+  if (
+    command !== "chat" &&
+    openWikiSnapshotBefore !== (await createOpenWikiContentSnapshot(cwd))
+  ) {
+    await writeLastUpdateMetadata(command, cwd, COPILOT_CLI_MODEL_ID);
+    emitDebug(options, "metadata=written");
+  } else {
+    emitDebug(
+      options,
+      command === "chat"
+        ? "metadata=skipped command=chat"
+        : "metadata=skipped openwiki=unchanged",
+    );
+  }
+
+  return {
+    command,
+    model: COPILOT_CLI_MODEL_ID,
+  };
+}
+
+const COPILOT_CLI_TIMEOUT_MS = 5 * 60 * 1000;
+
+function runCopilotCliProcess(
+  copilotCommand: string,
+  prompt: string,
+  cwd: string,
+  options: OpenWikiRunOptions,
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const args = ["-p", prompt, "--autopilot", "--yolo", "--no-ask-user", "--no-color"];
+    emitDebug(options, `copilot.args.count=${args.length}`);
+
+    const child = spawn(copilotCommand, args, {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    const killTimer = setTimeout(() => {
+      child.kill();
+      reject(new Error(`Copilot CLI timed out after ${COPILOT_CLI_TIMEOUT_MS / 1000}s.`));
+    }, COPILOT_CLI_TIMEOUT_MS);
+
+    let stderrOutput = "";
+
+    child.stdout?.on("data", (chunk: Buffer) => {
+      const text = chunk.toString("utf8");
+
+      if (text.length > 0) {
+        options.onEvent?.({ source: "main", type: "text", text });
+      }
+    });
+
+    child.stderr?.on("data", (chunk: Buffer) => {
+      stderrOutput += chunk.toString("utf8");
+    });
+
+    child.once("error", (error) => {
+      clearTimeout(killTimer);
+
+      if (isFileNotFoundError(error)) {
+        reject(
+          new Error(
+            `Could not find the "${copilotCommand}" command. Install the GitHub Copilot CLI and ensure it is authenticated and on your PATH.`,
+          ),
+        );
+        return;
+      }
+
+      reject(error);
+    });
+
+    child.once("close", (exitCode) => {
+      clearTimeout(killTimer);
+
+      if (exitCode === 0) {
+        resolve();
+        return;
+      }
+
+      const trimmedStderr = stderrOutput.trim();
+
+      reject(
+        new Error(
+          `Copilot CLI exited with code ${exitCode}.${
+            trimmedStderr ? ` ${trimmedStderr}` : ""
+          }`,
+        ),
+      );
+    });
+  });
+}
+
 function createAttemptOptions(
   options: OpenWikiRunOptions,
   attemptIndex: number,
@@ -366,9 +504,9 @@ function emitDebug(options: OpenWikiRunOptions, message: string): void {
 function ensureProviderKey(provider: OpenWikiProvider): void {
   const apiKeyEnvKey = getProviderApiKeyEnvKey(provider);
 
-  if (!process.env[apiKeyEnvKey]) {
+  if (!apiKeyEnvKey || !process.env[apiKeyEnvKey]) {
     throw new Error(
-      `${apiKeyEnvKey} is required to run OpenWiki with ${getProviderLabel(provider)}.`,
+      `${apiKeyEnvKey ?? "An API key"} is required to run OpenWiki with ${getProviderLabel(provider)}.`,
     );
   }
 }
@@ -406,12 +544,18 @@ function resolveModelId(
   return modelId;
 }
 
+function readProviderApiKey(provider: OpenWikiProvider): string | undefined {
+  const apiKeyEnvKey = getProviderApiKeyEnvKey(provider);
+
+  return apiKeyEnvKey ? process.env[apiKeyEnvKey] : undefined;
+}
+
 function createModel(provider: OpenWikiProvider, modelId: string) {
   if (provider === "anthropic") {
     const baseURL = resolveProviderBaseUrl(provider);
 
     return new ChatAnthropic(modelId, {
-      apiKey: process.env[getProviderApiKeyEnvKey(provider)],
+      apiKey: readProviderApiKey(provider),
       ...(baseURL ? { anthropicApiUrl: baseURL } : {}),
     });
   }
@@ -432,7 +576,7 @@ function createModel(provider: OpenWikiProvider, modelId: string) {
   const baseURL = resolveProviderBaseUrl(provider);
 
   return new ChatOpenAI({
-    apiKey: process.env[getProviderApiKeyEnvKey(provider)],
+    apiKey: readProviderApiKey(provider),
     configuration: baseURL
       ? {
           baseURL,

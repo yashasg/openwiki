@@ -1,14 +1,22 @@
 import { describe, expect, test } from "vitest";
 import {
+  COPILOT_CLI_COMMAND_ENV_KEY,
+  COPILOT_CLI_MODEL_ID,
+  DEFAULT_COPILOT_CLI_COMMAND,
   DEFAULT_MODEL_ID,
   DEFAULT_PROVIDER,
   getDefaultModelId,
+  getProviderApiKeyEnvKey,
+  getProviderAuthMode,
+  isCliProvider,
   isValidBaseUrl,
   isValidModelId,
   isValidProvider,
   normalizeModelId,
   normalizeProvider,
+  providerRequiresApiKey,
   resolveConfiguredProvider,
+  resolveCopilotCliCommand,
   resolveProviderBaseUrl,
 } from "../src/constants.ts";
 
@@ -141,4 +149,53 @@ describe("getDefaultModelId", () => {
       expect(getDefaultModelId("openai-compatible")).toBe(DEFAULT_MODEL_ID);
     },
   );
+});
+
+describe("copilot-cli provider", () => {
+  test("is a valid, selectable provider", () => {
+    expect(isValidProvider("copilot-cli")).toBe(true);
+    expect(normalizeProvider(" Copilot-CLI ")).toBe("copilot-cli");
+  });
+
+  test("has a 'cli' auth mode instead of 'api-key'", () => {
+    expect(getProviderAuthMode("copilot-cli")).toBe("cli");
+    expect(isCliProvider("copilot-cli")).toBe(true);
+    expect(providerRequiresApiKey("copilot-cli")).toBe(false);
+  });
+
+  test("other providers remain 'api-key' auth mode", () => {
+    expect(getProviderAuthMode("openrouter")).toBe("api-key");
+    expect(isCliProvider("openrouter")).toBe(false);
+    expect(providerRequiresApiKey("anthropic")).toBe(true);
+  });
+
+  test("has no API key env key", () => {
+    expect(getProviderApiKeyEnvKey("copilot-cli")).toBeUndefined();
+  });
+
+  test("has no base URL", () => {
+    expect(resolveProviderBaseUrl("copilot-cli", {})).toBeUndefined();
+  });
+
+  test("default model id is the fixed copilot-cli pseudo-model id", () => {
+    expect(getDefaultModelId("copilot-cli")).toBe(COPILOT_CLI_MODEL_ID);
+  });
+
+  test("resolveCopilotCliCommand defaults to the copilot binary", () => {
+    expect(resolveCopilotCliCommand({})).toBe(DEFAULT_COPILOT_CLI_COMMAND);
+  });
+
+  test("resolveCopilotCliCommand honors an override env var", () => {
+    expect(
+      resolveCopilotCliCommand({
+        [COPILOT_CLI_COMMAND_ENV_KEY]: "/usr/local/bin/copilot",
+      }),
+    ).toBe("/usr/local/bin/copilot");
+  });
+
+  test("resolveCopilotCliCommand ignores a whitespace-only override", () => {
+    expect(
+      resolveCopilotCliCommand({ [COPILOT_CLI_COMMAND_ENV_KEY]: "   " }),
+    ).toBe(DEFAULT_COPILOT_CLI_COMMAND);
+  });
 });

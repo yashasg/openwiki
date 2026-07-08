@@ -71,7 +71,7 @@ These configuration options and secrets will be saved to `~/.openwiki/.env` on y
 
 ## Customizing
 
-OpenWiki supports OpenRouter, Fireworks, Baseten, OpenAI, an OpenAI-compatible provider, and Anthropic out of the box. By default, there are a few models pre-defined (GLM 5.2, Kimi K2.6, Sonnet 5, etc) but for each inference provider, OpenWiki will allow you to specify your own custom model ID.
+OpenWiki supports OpenRouter, Fireworks, Baseten, OpenAI, an OpenAI-compatible provider, Anthropic, and the GitHub Copilot CLI out of the box. By default, there are a few models pre-defined (GLM 5.2, Kimi K2.6, Sonnet 5, etc) but for each inference provider, OpenWiki will allow you to specify your own custom model ID.
 
 ### Alternative base URLs
 
@@ -101,6 +101,29 @@ OPENWIKI_MODEL_ID=your-gateway-model-name
 ```
 
 Base URLs (and all credentials) can be set in your environment or stored in `~/.openwiki/.env`.
+
+### GitHub Copilot CLI
+
+The `copilot-cli` provider runs the [GitHub Copilot CLI](https://github.com/github/copilot-cli)
+as a subprocess instead of calling a chat-completions API directly. It requires
+no API key — install and authenticate the `copilot` CLI yourself
+(`copilot` must be on your `PATH`), and OpenWiki will invoke it non-interactively
+for each run:
+
+```bash
+OPENWIKI_PROVIDER=copilot-cli
+```
+
+If your `copilot` binary is not on `PATH` under that name, you can point OpenWiki
+at it explicitly:
+
+```bash
+OPENWIKI_COPILOT_CLI_COMMAND=/usr/local/bin/copilot
+```
+
+Because each run spawns a fresh `copilot` process, the Copilot CLI provider does
+not currently support resuming a prior conversation across `/chat` follow-ups the
+way the other, LangGraph-backed providers do — every run starts a new session.
 
 If there's an inference provider or model you'd like to see added, please open a PR!
 

@@ -7,7 +7,7 @@ The documentation agent is implemented in `src/agent/`. It takes a command (`cha
 `src/agent/index.ts` follows this sequence for non-chat runs:
 
 1. Load `~/.openwiki/.env` into `process.env`.
-2. Resolve the provider via `resolveConfiguredProvider()` and ensure the provider's API key exists.
+2. Resolve the provider via `resolveConfiguredProvider()`. If the provider is CLI-based (`isCliProvider()`, currently only `copilot-cli`), short-circuit to `runCopilotCliAgent()` (see [Copilot CLI provider](#copilot-cli-provider) below) instead of continuing with steps 3–9. Otherwise, ensure the provider's API key exists.
 3. Resolve the model ID from CLI input, `OPENWIKI_MODEL_ID`, or the provider's default model.
 4. Create a run context from Git state and prior update metadata.
 5. Snapshot the current `openwiki/` content hash (before the run).
@@ -26,8 +26,19 @@ Chat runs skip metadata writes entirely.
 - **anthropic**: `new ChatAnthropic(modelId, { apiKey, anthropicApiUrl? })` — uses `@langchain/anthropic` directly. When `ANTHROPIC_BASE_URL` is set, the resolved alternative base URL is passed as `anthropicApiUrl` so requests can be routed to a self-hosted or proxied Anthropic-compatible endpoint instead of the default API.
 - **openrouter**: `new ChatOpenRouter({ apiKey, baseURL, model, models, route: "fallback", siteName: "OpenWiki" })` — passes a fallback model list so OpenRouter can route around server-side failures.
 - **baseten / fireworks / openai / openai-compatible**: `new ChatOpenAI({ apiKey, configuration: { baseURL? }, model })` — OpenAI-compatible clients using the provider's base URL when configured. The `openai-compatible` provider has no default endpoint; its base URL is user-supplied via `OPENAI_COMPATIBLE_BASE_URL` and required (`requiresBaseUrl: true`), which lets OpenWiki target any OpenAI-compatible gateway (for example a LiteLLM gateway fronting upstream providers).
+- **copilot-cli**: no model client is created — `createModel()` is never called for this provider. See below.
 
 Base URLs are resolved through `resolveProviderBaseUrl()` in `src/constants.ts`, which prefers a provider's alternative base URL environment variable (`baseUrlEnvKey`) over the built-in default before falling back to the SDK's own default endpoint. Providers marked `requiresBaseUrl` are validated at startup by `ensureProviderBaseUrl()`.
+
+## Copilot CLI provider
+
+The `copilot-cli` provider has `authMode: "cli"` and is handled entirely outside the DeepAgents/LangGraph pipeline:
+
+- `runOpenWikiAgent()` checks `isCliProvider(provider)` immediately after resolving the provider, before any API-key or model-fallback logic runs, and calls `runCopilotCliAgent()` instead.
+- `runCopilotCliAgent()` still builds a run context, snapshots `openwiki/` content, and assembles a prompt via `createCopilotCliRunPrompt()` — a variant of the system/user prompt that omits DeepAgents-specific virtual filesystem instructions, since Copilot CLI's own tools operate directly on real repository paths.
+- `runCopilotCliProcess()` spawns the resolved `copilot` binary (`resolveCopilotCliCommand()`, default `copilot`, overridable via `OPENWIKI_COPILOT_CLI_COMMAND`) with `["-p", prompt, "--autopilot", "--yolo", "--no-ask-user", "--no-color"]`, streaming stdout as `text` run events and capturing stderr for error reporting. A missing binary (`ENOENT`) produces a clear "install the GitHub Copilot CLI" error.
+- Metadata writes (`openwiki/.last-update.json`) and content-change detection still apply the same way as for other providers.
+- There is no equivalent of the SQLite checkpointer for this provider: each run is a fresh, stateless `copilot` subprocess, so multi-turn `/chat` continuity across runs is not currently supported for `copilot-cli`.
 
 ## Prompting strategy
 
