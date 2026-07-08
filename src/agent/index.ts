@@ -338,6 +338,8 @@ async function runCopilotCliAgent(
   };
 }
 
+const COPILOT_CLI_TIMEOUT_MS = 5 * 60 * 1000;
+
 function runCopilotCliProcess(
   copilotCommand: string,
   prompt: string,
@@ -352,6 +354,11 @@ function runCopilotCliProcess(
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
     });
+
+    const killTimer = setTimeout(() => {
+      child.kill();
+      reject(new Error(`Copilot CLI timed out after ${COPILOT_CLI_TIMEOUT_MS / 1000}s.`));
+    }, COPILOT_CLI_TIMEOUT_MS);
 
     let stderrOutput = "";
 
@@ -368,6 +375,8 @@ function runCopilotCliProcess(
     });
 
     child.once("error", (error) => {
+      clearTimeout(killTimer);
+
       if (isFileNotFoundError(error)) {
         reject(
           new Error(
@@ -381,6 +390,8 @@ function runCopilotCliProcess(
     });
 
     child.once("close", (exitCode) => {
+      clearTimeout(killTimer);
+
       if (exitCode === 0) {
         resolve();
         return;

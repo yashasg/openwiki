@@ -247,10 +247,6 @@ export function createCopilotCliRunPrompt(
   context: RunContext,
   options: OpenWikiRunOptions,
 ): string {
-  if (options.isFollowup === true && options.userMessage?.trim()) {
-    return options.userMessage.trim();
-  }
-
   return `
 ${createSystemPrompt(command)}
 
